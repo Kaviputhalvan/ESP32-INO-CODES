@@ -12,26 +12,13 @@ struct WiFiOption {
   String pass;
 };
 
-WiFiOption staOptions[] = {
-  {"SSID1", "1234321"},
-  {"BackupSSID", "backup123"},
-  {"AltSSID3", "altpass3"}
-};
+WiFiOption staOptions[3];
 
 String ap_ssid = "ESP32_Extender";
-String ap_pass = "12345654";
+String ap_pass = "12345678";
 
 std::vector<String> blockList;
 std::vector<String> fullBlockList;
-
-struct ClientInfo {
-  String mac;
-  String ip;
-  size_t dataUsed;
-};
-
-std::vector<ClientInfo> clients;
-size_t dataLimitMB = 0;
 
 bool isMACBlocked(String mac) {
   return std::find(blockList.begin(), blockList.end(), mac) != blockList.end();
@@ -53,9 +40,7 @@ void blockAll(String mac) {
     wifi_sta_info_t sta = sta_list.sta[i];
     char buff[18];
     sprintf(buff, "%02X:%02X:%02X:%02X:%02X:%02X", sta.mac[0], sta.mac[1], sta.mac[2], sta.mac[3], sta.mac[4], sta.mac[5]);
-    if (mac.equalsIgnoreCase(buff)) {
-      esp_wifi_deauth_sta(sta.mac);
-    }
+    if (mac.equalsIgnoreCase(buff)) esp_wifi_deauth_sta(sta.mac);
   }
 }
 
@@ -66,11 +51,13 @@ void unblock(String mac) {
 
 void connectToSTA() {
   WiFi.mode(WIFI_AP_STA);
-  for (WiFiOption option : staOptions) {
-    WiFi.begin(option.ssid.c_str(), option.pass.c_str());
-    int tries = 15;
-    while (WiFi.status() != WL_CONNECTED && tries-- > 0) delay(500);
-    if (WiFi.status() == WL_CONNECTED) break;
+  for (int i = 0; i < 3; i++) {
+    if (staOptions[i].ssid != "") {
+      WiFi.begin(staOptions[i].ssid.c_str(), staOptions[i].pass.c_str());
+      int tries = 15;
+      while (WiFi.status() != WL_CONNECTED && tries-- > 0) delay(500);
+      if (WiFi.status() == WL_CONNECTED) break;
+    }
   }
   WiFi.softAP(ap_ssid.c_str(), ap_pass.c_str());
 }
@@ -94,7 +81,7 @@ void handleClientsPage() {
   tcpip_adapter_get_sta_list(&sta_list, &adapter_sta_list);
 
   String html = htmlHeader();
-  html += "<h2>Connected Clients</h2><table><tr><th>MAC</th><th>IP</th><th>Data (MB)</th><th>Action</th></tr>";
+  html += "<h2>Connected Clients</h2><table><tr><th>MAC</th><th>IP</th><th>Action</th></tr>";
   for (int i = 0; i < adapter_sta_list.num; i++) {
     tcpip_adapter_sta_info_t sta = adapter_sta_list.sta[i];
     char mac[18];
@@ -103,14 +90,8 @@ void handleClientsPage() {
             sta.mac[3], sta.mac[4], sta.mac[5]);
     String macStr = String(mac);
     String ipStr = IPAddress(sta.ip.addr).toString();
-    size_t data = 0;
-    for (ClientInfo &c : clients) {
-      if (c.mac == macStr) {
-        data = c.dataUsed;
-        break;
-      }
-    }
-    html += "<tr><td>" + macStr + "</td><td>" + ipStr + "</td><td>" + String(data / 1024.0 / 1024.0, 2) + "</td><td>";
+
+    html += "<tr><td>" + macStr + "</td><td>" + ipStr + "</td><td>";
     html += "<form action='/block_inet' method='GET'><input type='hidden' name='mac' value='" + macStr + "'><button>Block Internet</button></form>";
     html += "<form action='/block_all' method='GET'><input type='hidden' name='mac' value='" + macStr + "'><button>Block All</button></form>";
     html += "<form action='/unblock' method='GET'><input type='hidden' name='mac' value='" + macStr + "'><button>Unblock</button></form></td></tr>";
@@ -136,7 +117,6 @@ void handleConfig() {
   html += "STA2 SSID:<input name='ssid2'><br>PASS:<input name='pass2'><br>";
   html += "STA3 SSID:<input name='ssid3'><br>PASS:<input name='pass3'><br>";
   html += "AP SSID:<input name='ap_ssid'><br>PASS:<input name='ap_pass'><br>";
-  html += "Data Limit (MB):<input name='dlimit'><br>";
   html += "<input type='submit'></form><a href='/'>Back</a></body></html>";
   server.send(200, "text/html", html);
 }
@@ -150,7 +130,6 @@ void handleSave() {
   if (server.hasArg("pass3")) staOptions[2].pass = server.arg("pass3");
   if (server.hasArg("ap_ssid")) ap_ssid = server.arg("ap_ssid");
   if (server.hasArg("ap_pass")) ap_pass = server.arg("ap_pass");
-  if (server.hasArg("dlimit")) dataLimitMB = server.arg("dlimit").toInt();
   server.send(200, "text/html", "Saved. Restarting...");
   delay(1000);
   ESP.restart();
@@ -178,9 +157,7 @@ void handleStatus() {
   String html = htmlHeader();
   html += "<h2>Status Info</h2>";
   html += "<p><b>Connected SSID:</b> " + WiFi.SSID() + "</p>";
-  html += "<p><b>BSSID:</b> " + WiFi.BSSIDstr() + "</p>";
   html += "<p><b>RSSI:</b> " + String(WiFi.RSSI()) + " dBm</p>";
-  html += "<p><b>Data Limit:</b> " + String(dataLimitMB) + " MB</p>";
   html += "<a href='/'>Back</a></body></html>";
   server.send(200, "text/html", html);
 }
